@@ -77,6 +77,15 @@ export default function CreatePostPage() {
         });
       }
 
+      // Trigger AI content moderation
+      try {
+        await supabase.functions.invoke("moderate-content", {
+          body: { post_id: post.id },
+        });
+      } catch {
+        // Moderation runs async, don't block post creation
+      }
+
       toast.success("Post shared!");
       navigate("/");
     } catch (error: any) {
