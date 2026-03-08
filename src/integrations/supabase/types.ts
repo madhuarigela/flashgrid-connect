@@ -268,6 +268,7 @@ export type Database = {
           id: string
           is_private: boolean
           is_verified: boolean
+          phone: string | null
           updated_at: string
           user_id: string
           username: string
@@ -281,6 +282,7 @@ export type Database = {
           id?: string
           is_private?: boolean
           is_verified?: boolean
+          phone?: string | null
           updated_at?: string
           user_id: string
           username: string
@@ -294,6 +296,7 @@ export type Database = {
           id?: string
           is_private?: boolean
           is_verified?: boolean
+          phone?: string | null
           updated_at?: string
           user_id?: string
           username?: string

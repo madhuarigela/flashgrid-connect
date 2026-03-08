@@ -1,21 +1,50 @@
-import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { useState, useRef, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { lovable } from "@/integrations/lovable";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
+import { ChevronDown, Search } from "lucide-react";
 import flashgridLogo from "@/assets/flashgrid-logo.png";
+import { countryCodes, type CountryCode } from "@/data/countryCodes";
+
+type LoginMethod = "email" | "phone";
 
 export default function AuthPage() {
   const [isLogin, setIsLogin] = useState(true);
+  const [loginMethod, setLoginMethod] = useState<LoginMethod>("phone");
   const [email, setEmail] = useState("");
+  const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [loading, setLoading] = useState(false);
+  const [selectedCountry, setSelectedCountry] = useState<CountryCode>(countryCodes[0]); // India first
+  const [showCountryPicker, setShowCountryPicker] = useState(false);
+  const [countrySearch, setCountrySearch] = useState("");
   const navigate = useNavigate();
+  const pickerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setShowCountryPicker(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const filteredCountries = countryCodes.filter(
+    (c) =>
+      c.name.toLowerCase().includes(countrySearch.toLowerCase()) ||
+      c.dial.includes(countrySearch) ||
+      c.code.toLowerCase().includes(countrySearch.toLowerCase())
+  );
+
+  const fullPhone = `${selectedCountry.dial}${phone}`;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,8 +52,35 @@ export default function AuthPage() {
 
     try {
       if (isLogin) {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
+        if (loginMethod === "email") {
+          const { error } = await supabase.auth.signInWithPassword({ email, password });
+          if (error) throw error;
+        } else {
+          // Phone login: look up email by phone number
+          const { data: profileData } = await supabase
+            .from("profiles")
+            .select("user_id")
+            .eq("phone", fullPhone)
+            .single();
+          if (!profileData) {
+            toast.error("No account found with this phone number");
+            setLoading(false);
+            return;
+          }
+          // Get the user's email from auth - we need to use a workaround
+          // Since we can't query auth.users, we'll use phone as lookup
+          // The user must have registered with email, so we ask for password
+          const { error } = await supabase.auth.signInWithPassword({
+            phone: fullPhone,
+            password,
+          });
+          if (error) {
+            // Fallback: try email lookup
+            toast.error("Invalid phone number or password. Try logging in with email.");
+            setLoading(false);
+            return;
+          }
+        }
         toast.success("Welcome back!");
         navigate("/");
       } else {
@@ -33,6 +89,17 @@ export default function AuthPage() {
           setLoading(false);
           return;
         }
+        if (loginMethod === "phone" && !phone.trim()) {
+          toast.error("Phone number is required");
+          setLoading(false);
+          return;
+        }
+        if (loginMethod === "email" && !email.trim()) {
+          toast.error("Email is required");
+          setLoading(false);
+          return;
+        }
+
         // Check username availability
         const { data: existing } = await supabase
           .from("profiles")
@@ -45,19 +112,49 @@ export default function AuthPage() {
           return;
         }
 
-        const { error } = await supabase.auth.signUp({
-          email,
+        // Check phone uniqueness if phone signup
+        if (loginMethod === "phone") {
+          const { data: existingPhone } = await supabase
+            .from("profiles")
+            .select("id")
+            .eq("phone", fullPhone)
+            .single();
+          if (existingPhone) {
+            toast.error("Phone number already registered");
+            setLoading(false);
+            return;
+          }
+        }
+
+        const signUpData: any = {
           password,
           options: {
             emailRedirectTo: window.location.origin,
             data: {
               username: username.toLowerCase(),
               display_name: displayName,
+              phone: loginMethod === "phone" ? fullPhone : undefined,
             },
           },
-        });
+        };
+
+        if (loginMethod === "email") {
+          signUpData.email = email;
+        } else {
+          // For phone signup, we still need an email for Supabase auth
+          // Use phone-based email placeholder
+          signUpData.email = `${phone}@flashgrid.phone`;
+          signUpData.phone = fullPhone;
+        }
+
+        const { error } = await supabase.auth.signUp(signUpData);
         if (error) throw error;
-        toast.success("Account created! Check your email to confirm.");
+
+        if (loginMethod === "email") {
+          toast.success("Account created! Check your email to confirm.");
+        } else {
+          toast.success("Account created! You can now sign in.");
+        }
       }
     } catch (error: any) {
       toast.error(error.message);
@@ -86,6 +183,32 @@ export default function AuthPage() {
           </p>
         </div>
 
+        {/* Login method tabs */}
+        <div className="flex rounded-lg bg-secondary p-1">
+          <button
+            type="button"
+            onClick={() => setLoginMethod("phone")}
+            className={`flex-1 rounded-md py-2 text-sm font-medium transition-colors ${
+              loginMethod === "phone"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Phone
+          </button>
+          <button
+            type="button"
+            onClick={() => setLoginMethod("email")}
+            className={`flex-1 rounded-md py-2 text-sm font-medium transition-colors ${
+              loginMethod === "email"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            Email
+          </button>
+        </div>
+
         <form onSubmit={handleSubmit} className="space-y-4">
           {!isLogin && (
             <>
@@ -110,17 +233,90 @@ export default function AuthPage() {
               </div>
             </>
           )}
-          <div className="space-y-2">
-            <Label htmlFor="email">Email</Label>
-            <Input
-              id="email"
-              type="email"
-              placeholder="you@example.com"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-            />
-          </div>
+
+          {loginMethod === "phone" ? (
+            <div className="space-y-2">
+              <Label htmlFor="phone">Phone Number</Label>
+              <div className="flex gap-2">
+                {/* Country code picker */}
+                <div className="relative" ref={pickerRef}>
+                  <button
+                    type="button"
+                    onClick={() => setShowCountryPicker(!showCountryPicker)}
+                    className="flex h-10 items-center gap-1 rounded-md border border-input bg-background px-2.5 text-sm hover:bg-accent transition-colors min-w-[90px]"
+                  >
+                    <span className="text-base">{selectedCountry.flag}</span>
+                    <span className="text-foreground">{selectedCountry.dial}</span>
+                    <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                  </button>
+
+                  {showCountryPicker && (
+                    <div className="absolute left-0 top-full z-50 mt-1 w-72 rounded-lg border border-border bg-background shadow-lg">
+                      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+                        <Search className="h-4 w-4 text-muted-foreground" />
+                        <input
+                          type="text"
+                          placeholder="Search country..."
+                          value={countrySearch}
+                          onChange={(e) => setCountrySearch(e.target.value)}
+                          className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+                          autoFocus
+                        />
+                      </div>
+                      <div className="max-h-52 overflow-y-auto">
+                        {filteredCountries.map((country) => (
+                          <button
+                            key={country.code}
+                            type="button"
+                            onClick={() => {
+                              setSelectedCountry(country);
+                              setShowCountryPicker(false);
+                              setCountrySearch("");
+                            }}
+                            className={`flex w-full items-center gap-3 px-3 py-2.5 text-sm hover:bg-accent transition-colors ${
+                              selectedCountry.code === country.code ? "bg-accent" : ""
+                            }`}
+                          >
+                            <span className="text-base">{country.flag}</span>
+                            <span className="flex-1 text-left text-foreground">{country.name}</span>
+                            <span className="text-muted-foreground">{country.dial}</span>
+                          </button>
+                        ))}
+                        {filteredCountries.length === 0 && (
+                          <p className="px-3 py-4 text-center text-sm text-muted-foreground">
+                            No country found
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <Input
+                  id="phone"
+                  type="tel"
+                  placeholder="9876543210"
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value.replace(/\D/g, ""))}
+                  required
+                  className="flex-1"
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                placeholder="you@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+              />
+            </div>
+          )}
+
           <div className="space-y-2">
             <Label htmlFor="password">Password</Label>
             <Input
