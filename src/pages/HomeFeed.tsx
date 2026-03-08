@@ -1,115 +1,41 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
+import { useFeed } from "@/hooks/useFeed";
+import { useNotifications } from "@/hooks/useNotifications";
 import PostCard from "@/components/posts/PostCard";
 import { StoryAvatar } from "@/components/stories/StoryAvatar";
 import { Heart, Send, PlusSquare } from "lucide-react";
 import flashgridLogo from "@/assets/flashgrid-logo.png";
 
-interface FeedPost {
-  id: string;
-  caption: string | null;
-  location: string | null;
-  created_at: string;
-  user: {
-    username: string;
-    display_name: string | null;
-    avatar_url: string | null;
-    is_verified: boolean;
-  };
-  media: { media_url: string; media_type: string; sort_order: number }[];
-  likes_count: number;
-  comments_count: number;
-  is_liked: boolean;
-  is_saved: boolean;
-}
-
 export default function HomeFeed() {
   const { user, profile } = useAuth();
   const navigate = useNavigate();
-  const [posts, setPosts] = useState<FeedPost[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { posts, loading, loadingMore, hasMore, fetchFeed, loadMore } = useFeed();
+  const { unreadCount } = useNotifications();
+  const observerRef = useRef<IntersectionObserver | null>(null);
 
   useEffect(() => {
-    fetchFeed();
-  }, [user]);
+    if (user) fetchFeed();
+  }, [user, fetchFeed]);
 
-  const fetchFeed = async () => {
-    if (!user) return;
+  // Infinite scroll observer
+  const lastPostRef = useCallback(
+    (node: HTMLElement | null) => {
+      if (loading || loadingMore) return;
+      if (observerRef.current) observerRef.current.disconnect();
 
-    try {
-      // Get posts from followed users + own posts
-      const { data: followingData } = await supabase
-        .from("follows")
-        .select("following_id")
-        .eq("follower_id", user.id);
-
-      const followingIds = followingData?.map((f) => f.following_id) || [];
-      const feedUserIds = [...followingIds, user.id];
-
-      const { data: postsData } = await supabase
-        .from("posts")
-        .select(`
-          id, caption, location, created_at, user_id,
-          post_media(media_url, media_type, sort_order),
-          likes(user_id),
-          comments(id)
-        `)
-        .in("user_id", feedUserIds)
-        .order("created_at", { ascending: false })
-        .limit(20);
-
-      if (!postsData) {
-        setPosts([]);
-        setLoading(false);
-        return;
-      }
-
-      // Get profiles for post authors
-      const userIds = [...new Set(postsData.map((p) => p.user_id))];
-      const { data: profiles } = await supabase
-        .from("profiles")
-        .select("user_id, username, display_name, avatar_url, is_verified")
-        .in("user_id", userIds);
-
-      const profileMap = new Map(profiles?.map((p) => [p.user_id, p]));
-
-      // Get saved posts
-      const { data: savedData } = await supabase
-        .from("saved_posts")
-        .select("post_id")
-        .eq("user_id", user.id);
-      const savedSet = new Set(savedData?.map((s) => s.post_id));
-
-      const feedPosts: FeedPost[] = postsData.map((post) => {
-        const authorProfile = profileMap.get(post.user_id);
-        return {
-          id: post.id,
-          caption: post.caption,
-          location: post.location,
-          created_at: post.created_at,
-          user: {
-            username: authorProfile?.username || "unknown",
-            display_name: authorProfile?.display_name || null,
-            avatar_url: authorProfile?.avatar_url || null,
-            is_verified: authorProfile?.is_verified || false,
-          },
-          media: (post.post_media || []).sort((a, b) => a.sort_order - b.sort_order),
-          likes_count: post.likes?.length || 0,
-          comments_count: post.comments?.length || 0,
-          is_liked: post.likes?.some((l) => l.user_id === user.id) || false,
-          is_saved: savedSet.has(post.id),
-        };
+      observerRef.current = new IntersectionObserver((entries) => {
+        if (entries[0].isIntersecting && hasMore) {
+          loadMore();
+        }
       });
 
-      setPosts(feedPosts);
-    } catch (error) {
-      console.error("Error fetching feed:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+      if (node) observerRef.current.observe(node);
+    },
+    [loading, loadingMore, hasMore, loadMore]
+  );
 
   const handleLike = async (postId: string, isLiked: boolean) => {
     if (!user) return;
@@ -143,6 +69,11 @@ export default function HomeFeed() {
           </button>
           <button className="tap-highlight-none relative">
             <Heart className="h-6 w-6 text-foreground" />
+            {unreadCount > 0 && (
+              <span className="absolute -right-1.5 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-bold text-destructive-foreground">
+                {unreadCount > 99 ? "99+" : unreadCount}
+              </span>
+            )}
           </button>
           <button onClick={() => navigate("/messages")} className="tap-highlight-none">
             <Send className="h-6 w-6 text-foreground" />
@@ -158,7 +89,6 @@ export default function HomeFeed() {
           isOwn
           size="md"
         />
-        {/* Placeholder stories - will be populated from DB */}
       </div>
 
       {/* Posts */}
@@ -181,15 +111,31 @@ export default function HomeFeed() {
           </button>
         </div>
       ) : (
-        posts.map((post) => (
-          <PostCard
-            key={post.id}
-            post={post}
-            onLike={() => handleLike(post.id, post.is_liked)}
-            onSave={() => handleSave(post.id, post.is_saved)}
-            onProfileClick={() => navigate(`/user/${post.user.username}`)}
-          />
-        ))
+        <>
+          {posts.map((post, index) => (
+            <div
+              key={post.id}
+              ref={index === posts.length - 1 ? lastPostRef : undefined}
+            >
+              <PostCard
+                post={post}
+                onLike={() => handleLike(post.id, post.is_liked)}
+                onSave={() => handleSave(post.id, post.is_saved)}
+                onProfileClick={() => navigate(`/user/${post.user.username}`)}
+              />
+            </div>
+          ))}
+          {loadingMore && (
+            <div className="flex items-center justify-center py-6">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-muted border-t-primary" />
+            </div>
+          )}
+          {!hasMore && posts.length > 0 && (
+            <div className="flex items-center justify-center py-8">
+              <p className="text-sm text-muted-foreground">You're all caught up! ✓</p>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
