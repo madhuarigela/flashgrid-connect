@@ -13,6 +13,10 @@ export default {
       },
     },
     extend: {
+      fontFamily: {
+        display: ["Space Grotesk", "sans-serif"],
+        body: ["Inter", "-apple-system", "BlinkMacSystemFont", "sans-serif"],
+      },
       colors: {
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
@@ -47,6 +51,12 @@ export default {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        ig: {
+          orange: "hsl(var(--ig-orange))",
+          pink: "hsl(var(--ig-pink))",
+          purple: "hsl(var(--ig-purple))",
+          blue: "hsl(var(--ig-blue))",
+        },
         sidebar: {
           DEFAULT: "hsl(var(--sidebar-background))",
           foreground: "hsl(var(--sidebar-foreground))",
@@ -65,25 +75,44 @@ export default {
       },
       keyframes: {
         "accordion-down": {
-          from: {
-            height: "0",
-          },
-          to: {
-            height: "var(--radix-accordion-content-height)",
-          },
+          from: { height: "0" },
+          to: { height: "var(--radix-accordion-content-height)" },
         },
         "accordion-up": {
-          from: {
-            height: "var(--radix-accordion-content-height)",
-          },
-          to: {
-            height: "0",
-          },
+          from: { height: "var(--radix-accordion-content-height)" },
+          to: { height: "0" },
+        },
+        "like-pop": {
+          "0%": { transform: "scale(0)", opacity: "0" },
+          "50%": { transform: "scale(1.3)" },
+          "100%": { transform: "scale(1)", opacity: "1" },
+        },
+        "heart-burst": {
+          "0%": { transform: "scale(0)", opacity: "1" },
+          "50%": { transform: "scale(1.4)", opacity: "0.8" },
+          "100%": { transform: "scale(0)", opacity: "0" },
+        },
+        "slide-up": {
+          from: { transform: "translateY(100%)", opacity: "0" },
+          to: { transform: "translateY(0)", opacity: "1" },
+        },
+        "fade-in": {
+          from: { opacity: "0" },
+          to: { opacity: "1" },
+        },
+        "story-progress": {
+          from: { width: "0%" },
+          to: { width: "100%" },
         },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
+        "like-pop": "like-pop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275)",
+        "heart-burst": "heart-burst 0.6s ease-out forwards",
+        "slide-up": "slide-up 0.3s ease-out",
+        "fade-in": "fade-in 0.2s ease-out",
+        "story-progress": "story-progress 5s linear forwards",
       },
     },
   },
